@@ -111,7 +111,7 @@ depressionData[,"probability"] <- with(depressionData, depressionData[, "odds"]/
 kable(depressionData, format = 'markdown')
 ```
 
-Using a threshold probability of 0.5, what is:  
+__Using a threshold probability of 0.5, what is:__  
 
 - the accuracy of the model?
 - the sensitivity of the model?
@@ -146,9 +146,9 @@ __3.__ specificity of the model => (TN)/(TN + FP) => 2/3 => 0.666
 __4.__ precision of the model => (TP)/(TP + FP) => 1/2 => 0.5  
 __5.__ recall of the model => sensitivity => 1  
 
-Suppose you want to know the prevalence of diabetes in Pittsburgh. If you randomly survey 10 Pittsburghers and 5 of them state they have diabetes:
+__Suppose you want to know the prevalence of diabetes in Pittsburgh. If you randomly survey 10 Pittsburghers and 5 of them state they have diabetes:__
 
-- what is the maximum likelihood estimate for the prevalence of diabetes?  
+- __what is the maximum likelihood estimate for the prevalence of diabetes?__  
 Since, the likelihood is not conditional, therefore, the MLE here is the basic probability of a person having diabetes. The data for the 10 Pittsburghers is as shown below.  
 ```{r eval=T, message=F}
 diabetes_data <- data.frame( 
@@ -161,8 +161,8 @@ kable(diabetes_data, format = 'markdown')
 
 MLE for the prevalence of diabetes => 5/10 => 1/2 => 0.5  
 
-- given your strong belief specified by a beta prior of $\alpha = 11, \beta = 21$, what is the maximum a posteriori estimate for the prevalence of diabetes?  
-Citation-  
+- __given your strong belief specified by a beta prior of $\alpha = 11, \beta = 21$, what is the maximum a posteriori estimate for the prevalence of diabetes?  
+Citation-__  
 1. https://ragrawal.wordpress.com/2012/06/04/parameter-estimation/  
 
 I have used the formulae mentioned in the above website to calculate the MAP.  
