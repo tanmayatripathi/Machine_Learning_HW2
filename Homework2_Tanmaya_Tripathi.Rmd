@@ -1,0 +1,785 @@
+---
+title: "Analytics Practicum: Machine Learning for Health Care- Homework 2"
+author: "Tanmaya Tripathi"
+date: "03 March 2017"
+output: 
+  html_document:
+    fig_height: 5
+    fig_width: 10
+    toc: yes
+    toc_depth: 5
+  pdf_document:
+    toc: yes
+  word_document: default
+---
+
+```{r Loading_Library, warning=FALSE, message=FALSE}
+library(dplyr)
+library(survival)
+library(knitr)
+options(scipen=999)
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+```
+
+## Part 1: Concept questions (6 points)
+
+The code that follows introduces a toy data set, decision tree model, and two prediction functions.
+```{r eval=T, message=F}
+# synthetic depression data
+depressionData = data.frame( # do not change "depressionData"
+  pregnant = c(1,0,1,1),
+  depressed = c("yes","yes","no","no") %>% as.factor(),
+  hospitalized = c(1, 0, 0, 0) %>% as.logical()
+) %>% tbl_df()
+
+# tree: a model that outputs the odds of hospitalization from inputs of data (datums)
+tree = data.frame( # do not change "tree"
+  splitVariable = c("depressed", "pregnant", NA, NA, NA),
+  split = c("yes", 1, NA, NA, NA),
+  trueChild = c(2, 4, NA, NA, NA),
+  falseChild = c(3, 5, NA, NA, NA),
+  odds = c(NA, NA, 0.1, 2, 3)
+)
+
+predictOddsOnDataSet = function(tree, data, active = 1) {
+  apply(data, 1, (function(x) {predictedOdds(tree=tree, x, active=1)})  )
+}
+
+predictedOdds = function(tree, datum, active = 1) {
+  
+  if(is.na(tree[active,"splitVariable"])) { # leaf of tree, so output value
+    
+    return(tree$odds[active])
+    
+  } else {                                  # internal node of tree, so continue down tree to true/false child
+    
+    if( (datum[[tree[active,"splitVariable"] %>% as.character]] %>% as.character) == tree[active,"split"]){
+      return(predictedOdds(tree, datum, active = tree[active,"trueChild"]))
+    }
+    
+    else
+      return(predictedOdds(tree, datum, active = tree[active,"falseChild"]))
+    
+  }
+  
+}
+
+predictOddsOnDataSet(tree, depressionData)
+```
+  
+First, verify to yourself that, for the fourth patient in ```depressionData```, the tree should have output an odds of 0.1.  
+
+Fix the function ```predictedOdds``` so that ```predictedOddsOnDataSet``` outputs the odds for each patient in data. Use the debugger functions like ```debugOnce(predictedOdds)``` or ```browser()``` to inspect the code. 
+
+__What did you change?__  
+The following changes were made to the code-  
+__1.__ Added double quotes around trueChild in tree[active,trueChild]  
+__2.__ Added double quotes around falseChild in tree[active,falseChild]  
+
+__Add a column of the predicted probabilities of hospitalization to depressionData. Display it.__  
+```{r eval=T, message=F}
+library(knitr)
+
+predictOddsOnDataSet = function(tree, data, active = 1) {
+  as.data.frame(apply(data, 1, (function(x) {predictedOdds(tree=tree, x, active=1)})  ))
+}
+
+predictedOdds = function(tree, datum, active = 1) {
+  
+  if(is.na(tree[active,"splitVariable"])) { # leaf of tree, so output value
+    return(tree$odds[active])
+    
+  } else {                                  # internal node of tree, so continue down tree to true/false child
+    
+    if( (datum[[tree[active,"splitVariable"] %>% as.character]] %>% as.character) == tree[active,"split"]){
+      return(predictedOdds(tree, datum, active = tree[active,"trueChild"]))
+    }
+    
+    else
+      return(predictedOdds(tree, datum, active = tree[active,"falseChild"]))
+    
+  }
+  
+}
+
+odds_val <- predictOddsOnDataSet(tree, depressionData)
+depressionData <- cbind(depressionData, odds_val)
+colnames(depressionData) <- c("pregnant", "depressed", "hospitalized", "odds")
+
+depressionData[,"probability"] <- with(depressionData, depressionData[, "odds"]/(1 + depressionData[, "odds"]))
+
+kable(depressionData, format = 'markdown')
+```
+
+Using a threshold probability of 0.5, what is:  
+
+- the accuracy of the model?
+- the sensitivity of the model?
+- the specificity of the model?
+- the precision of the model?
+- the recall of the model?
+
+__The confusion matrix for the above data is as follows-__  
+
+```{r eval=T, message=F}
+depressionData[,"pred_hospitalization"] <- with(depressionData, ifelse(probability >= 0.5, 1, 0))
+
+depressionData[,"real_hospitalization"] <- with(depressionData, ifelse(hospitalized == TRUE, 1, 0))
+
+confusion_matrix <- table(depressionData$real_hospitalization, depressionData$pred_hospitalization,
+                          dnn = c("Reference", "Prediction"))
+
+rownames(confusion_matrix) <- c("Not Hospitalized", "Hospitalized")
+
+colnames(confusion_matrix) <- c("Not Hospitalized", "Hospitalized")
+
+kable(confusion_matrix, format = 'markdown')
+
+#TN  FP
+#FN  TP
+```
+
+__Based on the above matrix-__  
+__1.__ accuracy of the model => (TP + TN)/(TP + TN + FP + FN) => 3/4 => 0.75  
+__2.__ sensitivity of the model => (TP)/(TP + FN) => 1/1 => 1  
+__3.__ specificity of the model => (TN)/(TN + FP) => 2/3 => 0.666  
+__4.__ precision of the model => (TP)/(TP + FP) => 1/2 => 0.5  
+__5.__ recall of the model => sensitivity => 1  
+
+Suppose you want to know the prevalence of diabetes in Pittsburgh. If you randomly survey 10 Pittsburghers and 5 of them state they have diabetes:
+
+- what is the maximum likelihood estimate for the prevalence of diabetes?  
+Since, the likelihood is not conditional, therefore, the MLE here is the basic probability of a person having diabetes. The data for the 10 Pittsburghers is as shown below.  
+```{r eval=T, message=F}
+diabetes_data <- data.frame( 
+  patient_id = c(1,2,3,4,5,6,7,8,9,10),
+  diabetes = c(TRUE,TRUE,FALSE,TRUE,FALSE,FALSE,FALSE,FALSE,TRUE,TRUE)
+) %>% tbl_df()
+
+kable(diabetes_data, format = 'markdown')
+```
+
+MLE for the prevalence of diabetes => 5/10 => 1/2 => 0.5  
+
+- given your strong belief specified by a beta prior of $\alpha = 11, \beta = 21$, what is the maximum a posteriori estimate for the prevalence of diabetes?  
+Citation-  
+1. https://ragrawal.wordpress.com/2012/06/04/parameter-estimation/  
+
+I have used the formulae mentioned in the above website to calculate the MAP.  
+MAP = (a + alpha - 1)/(a + b + alpha + beta - 2)  
+Here-  
+a => number of diabetic patients  
+b => number of non-diabetic patients  
+alpha => 11  
+beta => 22  
+
+MAP = (5 + 11 - 1)/(5 + 5 + 11 + 21 - 2) = 0.375  
+
+## Part 2: Analysis (9 points)
+
+#### Preliminaries
+- **Y:** What was the definition of the primary outcome in this study?
+The primary outcome was death within 14 days and death or dependency at 6 months.  
+
+- What is (are) the variable name(s) for the outcome?
+From the perspective of the article, variables used for this outcome.  
+1. DDEAD- Dead on discharge form (to identify within 14 days)  
+2. FDEAD- Dead at six month follow-up  
+3. FDENNIS- Dependent at six month follow-up  
+
+- **U:** what is (are) the variable name(s) for the intervention, and what is (are) their possible values?
+The variable names of the intervention are-  
+RXASP- allocation of aspirin (coded as Y/N)  
+RXHEP- allocation of heparin (coded as M/L/N- High/Low/No)
+
+- **V, W:** describe the covariates included and the population being studied.  
+The covariates are as follows-  
+1. Whether the patient is on aspirin or not  
+2. Whether the patient is on heparin or not  
+
+There were other co-variates but based on my understanding of the article instead of taking them as co-variates, the entire population was divided into 6 treatment groups based on the following variables-  
+1. Delay in starting the trial after initial event  
+2. age of the patient  
+3. Gender of the patient  
+4. Onset or the condition of the patient at the time of the trial start  
+5. Level of consciousness at the start of the trial  
+6. Cardiac rhythm  
+7. Systolic BP  
+8. Stroke syndrome  
+9. Leg weakness  
+10. CT scan  
+11. Visibility of Infarct pre RCT  
+12. Aspirin/heparin within 3 days/24 hours respectively  
+
+A total of 19,435 patients were considered for the study.  
+
+Patient Inclusion criteria-  
+1. evidence of stroke within the last 48 hours  
+2. no evidence of intercranial haemorrhage  
+3. no contraindications to heparin or aspirin  
+4. doctor unsure of giving heparin/ aspirin  
+
+Patient exclusion criteria-
+1. the symptoms will likely resolve in next few hours  
+2. adverse drug events possible  
+3. already on long term anticoagulants  
+
+
+- Construct a so-called Table 1 for groups of {aspirin, no aspirin} use, including information on age, gender, systolic blood pressure, and conscious state.  
+In order to generate table 1 we will be using the tableone package.  
+
+```{r eval=T, message=F}
+library(tableone)
+patient_data <- read.csv("http://datashare.is.ed.ac.uk/bitstream/handle/10283/128/IST_corrected.csv", header = TRUE)
+
+variable_list <- c("RXASP", "AGE", "SEX", "RSBP", "RCONSC")
+
+variable_cat <- c("SEX", "RCONSC")
+
+#listVar <- c("Age", "Cholesterol", "SystolicBP", "BMI", "Smoking", "Education")
+table_one <- CreateTableOne(variable_list, patient_data, variable_cat, strata = c("RXASP"))
+table_one
+```
+
+#### Machine learning analysis
+Note: for this analysis, use a simple 50-50 train-test split.
+
+Let our outcome of interest be "dead or dependent at 6 months", i.e. so that we have a binary classification problem. What percent of patients are dead or dependent at 6 months in your train set and test set?  
+
+The below is the percentage of the patient that are dead or dependent at the end of 6 months-  
+```{r eval=T, message=F}
+patient_data$dead_dependent <- ifelse(patient_data$OCCODE==1 | patient_data$OCCODE==2, "Y", "N")
+
+sum(patient_data$dead_dependent == "Y")/nrow(patient_data) * 100
+```
+
+Choose which variables to include in your model. For example, remove variables for outcomes at 14 days (because if you are dead at 14 days you are certainly dead at 6 months). Moreover, you should remove all features measured after baseline if you want to make a prediction based on baseline data. Similarly, specific indicators of the outcome should also be removed, since those are measurements past the baseline that are not our outcome of interest. For these reasons, you will need to remove clusters of variables. Justify your approach.
+
+On analysis of the data, I would go ahead with the following columns-  
+
+RCONSC- Conscious state at randomisation (F - fully alert, D - drowsy, U - unconscious)  
+AGE- Age in years (Need to convert to categorical)  
+SEX- "M=male; F=female"  
+RSLEEP- Symptoms noted on waking (Y/N)  
+RVISINF- Infarct visible on CT (Y/N)  
+RHEP24- Heparin within 24 hours prior to randomisation (Y/N)  
+RASP3- Aspirin within 3 days prior to randomisation (Y/N)  
+RSBP- Systolic blood pressure at randomisation (mmHg), would have to convert to categorical variable for analysis  
+RDEF1- Face deficit (Y/N/C=can't assess)  
+RDEF2- Arm/hand deficit (Y/N/C=can't assess)  
+RDEF3- Leg/foot deficit (Y/N/C=can't assess)  
+RDEF4- Dysphasia (Y/N/C=can't assess)  
+RDEF5- Hemianopia (Y/N/C=can't assess)  
+RDEF6- Visuospatial disorder (Y/N/C=can't assess)  
+RDEF7- Brainstem/cerebellar signs (Y/N/C=can't assess)  
+RDEF8- Other deficit (Y/N/C=can't assess)  
+STYPE- Stroke subtype (TACS/PACS/POCS/LACS/other  
+RXASP- Trial aspirin allocated (Y/N)  
+
+DDIAGISC- Ischaemic stroke  
+DDIAGHA- Haemorrhagic stroke  
+DDIAGUN- Indeterminate stroke  
+DNOSTRK- Not a stroke  
+
+FAP- On antiplatelet drugs  
+FOAC- On anticoagulants  
+
+CNTRYNUM- Country code  
+dead_dependent- derived column, this is the Y for the table  
+
+Honourable mentions-  
+1. CMPLASP- Compliant for aspirin, will be taking a subset of data where CMPLASP is true.  
+2. EXPDD Predicted probability of death/dependence at 6 month, have taken this to compare it with the probability I will acquire from the models  
+```{r eval=T, message=F}
+patient_data <- patient_data[patient_data$CMPLASP == 'Y', c("RCONSC"
+,"AGE"
+,"SEX"
+,"RSLEEP"
+,"RVISINF"
+,"RHEP24"
+,"RASP3"
+,"RSBP"
+,"RDEF1"
+,"RDEF2"
+,"RDEF3"
+,"RDEF4"
+,"RDEF5"
+,"RDEF6"
+,"RDEF7"
+,"RDEF8"
+,"STYPE"
+,"RXASP"
+,"DDIAGISC"
+,"DDIAGHA"
+,"DDIAGUN"
+,"DNOSTRK"
+,"FAP"
+,"FOAC"
+,"CNTRYNUM"
+,"dead_dependent"
+,"EXPDD")]
+```
+
+Of the remaining variables, decide whether to exclude variables with missing data, impute them, and/or use indicator variables. (Note that if you choose multiple imputation for some variables, you would need to pool the results when evaluating performance, however for homework you may just use the first imputed data set). Justify your approach.  
+1. RHEP24 and RASP3 are null for some of the rows. Based on the analysis I believe that this is because the data is missing at non- random. The reason why this value is null because the physician did not enter this value. This is because it is false. Therefore I will be imupting these specific rows with value N.  
+```{r eval=T, message=F}
+patient_data$RHEP24 <- as.character(patient_data$RHEP24)
+patient_data$RHEP24 <- with(patient_data, ifelse(RHEP24 != "Y" & RHEP24 != "N", "N", RHEP24))
+
+patient_data$RASP3 <- as.character(patient_data$RASP3)
+patient_data$RASP3 <- with(patient_data, ifelse(RASP3 != "Y" & RASP3 != "N", "N", RASP3))
+```
+
+2. SysBP needs to be categorized, based on analysis three sets of categories will be created, <=120, 121 to 139 and >=140  
+```{r eval=T, message=F}
+patient_data$normal_SysBP <- with(patient_data, ifelse(RSBP <= 120, "Y", "N"))
+patient_data$high_SysBP <- with(patient_data, ifelse(RSBP > 120 & RSBP <= 139, "Y", "N"))
+patient_data$very_high_SysBP <- with(patient_data, ifelse(RSBP >= 140, "Y", "N"))
+```
+
+3. REDF1 to RDEF8 columns have values like Y/N/C where C stands for can't access. Unfortunately, we do not the reason for can't access. Therefore, we will go ahead by treating this as a third category.  
+
+4. DDIAGISC, DDIAGHA, DDIAGUN and DNOSTRK tell information about the various types of the strokes that occured to the patient initially. From my understanding of data a patient could have only one of these values as Y. Based on such conditions I am imputing values for other columns. At the end we are left with 1 row which still has null values and the same is removed from further analysis.  
+```{r eval=T, message=F}
+patient_data$DDIAGISC <- as.character(patient_data$DDIAGISC)
+patient_data$DDIAGISC <- with(patient_data, ifelse(DDIAGHA == "Y" | DDIAGUN == "Y" | DNOSTRK == "Y", "N", DDIAGISC))
+
+patient_data$DDIAGHA <- as.character(patient_data$DDIAGHA)
+patient_data$DDIAGHA <- with(patient_data, ifelse(DDIAGISC == "Y" | DDIAGUN == "Y" | DNOSTRK == "Y", "N", DDIAGHA))
+
+patient_data$DDIAGUN <- as.character(patient_data$DDIAGUN)
+patient_data$DDIAGUN <- with(patient_data, ifelse(DDIAGISC == "Y" | DDIAGHA == "Y" | DNOSTRK == "Y", "N", DDIAGUN))
+
+patient_data$DNOSTRK <- as.character(patient_data$DNOSTRK)
+patient_data$DNOSTRK <- with(patient_data, ifelse(DDIAGISC == "Y" | DDIAGHA == "Y" | DDIAGUN == "Y", "N", DNOSTRK))
+
+patient_data <- patient_data[patient_data$DDIAGISC == "Y" | patient_data$DDIAGISC == "N", ]
+patient_data <- patient_data[patient_data$DDIAGHA == "Y" | patient_data$DDIAGHA == "N", ]
+patient_data <- patient_data[patient_data$DDIAGUN == "Y" | patient_data$DDIAGUN == "N", ]
+patient_data <- patient_data[patient_data$DNOSTRK == "Y" | patient_data$DNOSTRK == "N", ]
+```
+
+5. Colums FAP and FOAC have a lot of null values and are proving to be very challenging to deal with. For further analysis these two columns will not be considered.  
+
+6. In order to categorize age I will follow the following study-  
+https://www.ncbi.nlm.nih.gov/pubmed/21150050  
+In order to compute the stroke risk, the age categories taken were <50, 50 to 75 and > 75. For my analysis I will be taking the same boundaries.  
+```{r eval=T, message=F}
+patient_data$young_age <- with(patient_data, ifelse(AGE < 50, "Y", "N"))
+patient_data$middle_age <- with(patient_data, ifelse(AGE >= 50 & AGE <= 75, "Y", "N"))
+patient_data$high_age <- with(patient_data, ifelse(AGE > 75, "Y", "N"))
+```
+
+In order to proeceed further we will be removing unwanted columns and converting the columns back to factors.  
+```{r eval=T, message=F}
+patient_data <- patient_data[, c("RCONSC"          
+,"young_age"       
+,"middle_age"      
+,"high_age"             
+,"SEX"             
+,"RSLEEP"          
+,"RVISINF"         
+,"RHEP24"          
+,"RASP3"          
+,"normal_SysBP"   
+,"high_SysBP"      
+,"very_high_SysBP"            
+,"RDEF1"           
+,"RDEF2"           
+,"RDEF3"           
+,"RDEF4"           
+,"RDEF5"           
+,"RDEF6"          
+,"RDEF7"           
+,"RDEF8"           
+,"STYPE"           
+,"RXASP"           
+,"DDIAGISC"        
+,"DDIAGHA"         
+,"DDIAGUN"        
+,"DNOSTRK"                    
+,"CNTRYNUM"        
+,"EXPDD"           
+,"dead_dependent")]
+
+patient_data$RCONSC <- as.factor(patient_data$RCONSC)
+patient_data$young_age <- as.factor(patient_data$young_age)
+patient_data$middle_age <- as.factor(patient_data$middle_age)
+patient_data$high_age <- as.factor(patient_data$high_age)
+patient_data$SEX <- as.factor(patient_data$SEX)
+patient_data$RSLEEP <- as.factor(patient_data$RSLEEP)
+patient_data$RVISINF <- as.factor(patient_data$RVISINF)
+patient_data$RHEP24 <- as.factor(patient_data$RHEP24)
+patient_data$RASP3 <- as.factor(patient_data$RASP3)
+patient_data$normal_SysBP <- as.factor(patient_data$normal_SysBP)
+patient_data$high_SysBP <- as.factor(patient_data$high_SysBP)
+patient_data$very_high_SysBP <- as.factor(patient_data$very_high_SysBP)
+patient_data$RDEF1 <- as.factor(patient_data$RDEF1)
+patient_data$RDEF2 <- as.factor(patient_data$RDEF2)
+patient_data$RDEF3 <- as.factor(patient_data$RDEF3)
+patient_data$RDEF4 <- as.factor(patient_data$RDEF4)
+patient_data$RDEF5 <- as.factor(patient_data$RDEF5)
+patient_data$RDEF6 <- as.factor(patient_data$RDEF6)
+patient_data$RDEF7 <- as.factor(patient_data$RDEF7)
+patient_data$RDEF8 <- as.factor(patient_data$RDEF8)
+patient_data$STYPE <- as.factor(patient_data$STYPE)
+patient_data$RXASP <- as.factor(patient_data$RXASP)
+patient_data$DDIAGISC <- as.factor(patient_data$DDIAGISC)
+patient_data$DDIAGHA <- as.factor(patient_data$DDIAGHA)
+patient_data$DDIAGUN <- as.factor(patient_data$DDIAGUN)
+patient_data$DNOSTRK <- as.factor(patient_data$DNOSTRK)
+patient_data$CNTRYNUM <- as.factor(patient_data$CNTRYNUM)
+patient_data$dead_dependent <- as.factor(patient_data$dead_dependent)
+
+library(caTools)
+set.seed(101) 
+patient_data$split_var <- sample.split(patient_data$RCONSC, SplitRatio = .50)
+patient_data_train <- subset(patient_data, split_var == TRUE)
+patient_data_test <- subset(patient_data, split_var == FALSE)
+```
+
+Use the following machine learning algorithms: logistic regression, naive Bayes, Tree Augmented Naive Bayes, and decision tree (specify any parameters you set that are not the default). The packages that you may find useful here are: "glm", "bnlearn", and "rpart", but you may use others if desired. In a table, report the accuracy with 95% confidence intervals for each algorithm.  
+
+Developing the Logistic Regression model-  
+```{r eval=T, message=F}
+log_reg_model <- glm(formula = dead_dependent=="Y" ~ RCONSC          
++young_age       
++middle_age      
++SEX             
++RSLEEP          
++RVISINF         
++RHEP24          
++RASP3          
++normal_SysBP   
++high_SysBP      
++RDEF1           
++RDEF2           
++RDEF3           
++RDEF4           
++RDEF5           
++RDEF6          
++RDEF7           
++RDEF8           
++STYPE           
++RXASP           
++DDIAGISC        
++DDIAGHA         
++DDIAGUN        
++DNOSTRK                    
++CNTRYNUM ,
+    family=binomial(link="logit"),
+    data = patient_data_train)
+
+summary(log_reg_model)
+```
+
+Based on the above model close to 25% of the deviance has been explained by the model. The predict function below predicts the outcome for train and test data.  
+```{r eval=T, message=F}
+patient_data_train$log_reg_pred <- predict(log_reg_model, patient_data_train, type="response")
+patient_data_train$log_reg_pred_yn <- with(patient_data_train, ifelse(log_reg_pred > 0.5, "Y", "N"))
+
+patient_data_test$log_reg_pred <- predict(log_reg_model, patient_data_test, type="response")
+patient_data_test$log_reg_pred_yn <- with(patient_data_test, ifelse(log_reg_pred > 0.5, "Y", "N"))
+```
+
+The confusion matrix of train and test data is shown below respectively-  
+```{r eval=T, message=F}
+table(patient_data_train$log_reg_pred_yn, patient_data_train$dead_dependent)
+table(patient_data_test$log_reg_pred_yn, patient_data_test$dead_dependent)
+```
+
+Implementing Naive Bayes to improve performance-  
+```{r eval=T, message=F}
+library(e1071)
+nai_bay_model <- naiveBayes(dead_dependent ~ RCONSC          
++young_age       
++middle_age      
++SEX             
++RSLEEP          
++RVISINF         
++RHEP24          
++RASP3          
++normal_SysBP   
++high_SysBP      
++RDEF1           
++RDEF2           
++RDEF3           
++RDEF4           
++RDEF5           
++RDEF6          
++RDEF7           
++RDEF8           
++STYPE           
++RXASP           
++DDIAGISC        
++DDIAGHA         
++DDIAGUN        
++DNOSTRK                    
++CNTRYNUM, data = patient_data_train)
+
+patient_data_train$nai_bay_pred <- predict(nai_bay_model, patient_data_train)
+#patient_data_train$nai_bay_pred_yn <- with(patient_data_train, ifelse(nai_bay_pred > 0.5, "Y", "N"))
+
+patient_data_test$nai_bay_pred <- predict(nai_bay_model, patient_data_test)
+#patient_data_test$nai_bay_pred_yn <- with(patient_data_test, ifelse(nai_bay_pred > 0.5, "Y", "N"))
+```
+
+The confusion matrix of train and test data is shown below respectively-  
+```{r eval=T, message=F}
+table(patient_data_train$nai_bay_pred, patient_data_train$dead_dependent)
+table(patient_data_test$nai_bay_pred, patient_data_test$dead_dependent)
+```
+
+Implementing Tree Augmented Naive Bayes-  
+```{r eval=T, message=F}
+library(bnlearn)
+patient_data_train_tree_nb <- patient_data_train[, c("RCONSC"          
+,"young_age"       
+,"middle_age"      
+,"high_age"             
+,"SEX"             
+,"RSLEEP"          
+,"RVISINF"         
+,"RHEP24"          
+,"RASP3"          
+,"normal_SysBP"   
+,"high_SysBP"      
+,"very_high_SysBP"            
+,"RDEF1"           
+,"RDEF2"           
+,"RDEF3"           
+,"RDEF4"           
+,"RDEF5"           
+,"RDEF6"          
+,"RDEF7"           
+,"RDEF8"           
+,"STYPE"           
+,"RXASP"           
+,"DDIAGISC"        
+,"DDIAGHA"         
+,"DDIAGUN"        
+,"DNOSTRK"                    
+,"CNTRYNUM"        
+,"dead_dependent")]
+
+tan_res <- tree.bayes(patient_data_train_tree_nb, "dead_dependent")
+patient_data_train_tree_nb$pred_ny = predict(tan_res, patient_data_train_tree_nb)
+
+patient_data_test_tree_nb <- patient_data_test[, c("RCONSC"          
+,"young_age"       
+,"middle_age"      
+,"high_age"             
+,"SEX"             
+,"RSLEEP"          
+,"RVISINF"         
+,"RHEP24"          
+,"RASP3"          
+,"normal_SysBP"   
+,"high_SysBP"      
+,"very_high_SysBP"            
+,"RDEF1"           
+,"RDEF2"           
+,"RDEF3"           
+,"RDEF4"           
+,"RDEF5"           
+,"RDEF6"          
+,"RDEF7"           
+,"RDEF8"           
+,"STYPE"           
+,"RXASP"           
+,"DDIAGISC"        
+,"DDIAGHA"         
+,"DDIAGUN"        
+,"DNOSTRK"                    
+,"CNTRYNUM"        
+,"dead_dependent")]
+patient_data_test_tree_nb$pred_ny = predict(tan_res, patient_data_test_tree_nb)
+
+```
+
+The confusion matrix of train and test data is shown below respectively-  
+```{r eval=T, message=F}
+table(patient_data_train_tree_nb$pred_ny, patient_data_train_tree_nb$dead_dependent)
+table(patient_data_test_tree_nb$pred_ny, patient_data_test_tree_nb$dead_dependent)
+```
+
+Implementing decision tree-  
+```{r eval=T, message=F}
+library(rpart)
+dec_tree_model <- rpart(dead_dependent ~ RCONSC          
++young_age       
++middle_age      
++SEX             
++RSLEEP          
++RVISINF         
++RHEP24          
++RASP3          
++normal_SysBP   
++high_SysBP      
++RDEF1           
++RDEF2           
++RDEF3           
++RDEF4           
++RDEF5           
++RDEF6          
++RDEF7           
++RDEF8           
++STYPE           
++RXASP           
++DDIAGISC        
++DDIAGHA         
++DDIAGUN        
++DNOSTRK                    
++CNTRYNUM, data = patient_data_train, method = "class")
+
+#summary(dec_tree_model)
+#printcp(dec_tree_model)
+
+patient_data_train$dec_tree_pred <- predict(dec_tree_model, patient_data_train, type = 'class')
+#patient_data_train$dec_tree_pred_yn <- with(patient_data_train, ifelse(dec_tree_pred > 0.5, "Y", "N"))
+
+patient_data_test$dec_tree_pred <- predict(dec_tree_model, patient_data_test, type = 'class')
+#patient_data_test$dec_tree_pred_yn <- with(patient_data_test, ifelse(dec_tree_pred > 0.5, "Y", "N"))
+```
+
+The confusion matrix of train and test data is shown below respectively-  
+```{r eval=T, message=F}
+table(patient_data_train$dec_tree_pred, patient_data_train$dead_dependent)
+table(patient_data_test$dec_tree_pred, patient_data_test$dead_dependent)
+```
+
+The accuracies of the different model are shown below-  
+```{r eval=T, message=F}
+Model_Name <- character(4)
+Train_Accuracy <- double(4)
+Test_Accuracy <- double(4)
+
+Model_Name[1] <- "Logistic Regression"
+Model_Name[2] <- "Naive Bayes"
+Model_Name[3] <- "Tree Augmented Naive Bayes"
+Model_Name[4] <- "Decision Tree"
+
+Train_Accuracy[1] <- 100*sum((patient_data_train$dead_dependent == "Y" & patient_data_train$log_reg_pred_yn == "Y") | 
+      (patient_data_train$dead_dependent == "N" & patient_data_train$log_reg_pred_yn == "N"))/nrow(patient_data_train)
+Train_Accuracy[2] <- 100*sum((patient_data_train$dead_dependent == "Y" & patient_data_train$nai_bay_pred == "Y") | 
+      (patient_data_train$dead_dependent == "N" & patient_data_train$nai_bay_pred == "N"))/nrow(patient_data_train)
+Train_Accuracy[3] <- 100*sum((patient_data_train_tree_nb$dead_dependent == "Y" & patient_data_train_tree_nb$pred_ny == "Y") | 
+      (patient_data_train_tree_nb$dead_dependent == "N" & patient_data_train_tree_nb$pred_ny == "N"))/nrow(patient_data_train_tree_nb)
+Train_Accuracy[4] <- 100*sum((patient_data_train$dead_dependent == "Y" & patient_data_train$dec_tree_pred == "Y") | 
+      (patient_data_train$dead_dependent == "N" & patient_data_train$dec_tree_pred == "N"))/nrow(patient_data_train)
+
+Test_Accuracy[1] <- 100*sum((patient_data_test$dead_dependent == "Y" & patient_data_test$log_reg_pred_yn == "Y") | 
+      (patient_data_test$dead_dependent == "N" & patient_data_test$log_reg_pred_yn == "N"))/nrow(patient_data_test)
+Test_Accuracy[2] <- 100*sum((patient_data_test$dead_dependent == "Y" & patient_data_test$nai_bay_pred == "Y") | 
+      (patient_data_test$dead_dependent == "N" & patient_data_test$nai_bay_pred == "N"))/nrow(patient_data_test)
+Test_Accuracy[3] <- 100*sum((patient_data_test_tree_nb$dead_dependent == "Y" & patient_data_test_tree_nb$pred_ny == "Y") | 
+      (patient_data_test_tree_nb$dead_dependent == "N" & patient_data_test_tree_nb$pred_ny == "N"))/nrow(patient_data_test_tree_nb)
+Test_Accuracy[4] <- 100*sum((patient_data_test$dead_dependent == "Y" & patient_data_test$dec_tree_pred == "Y") | 
+      (patient_data_test$dead_dependent == "N" & patient_data_test$dec_tree_pred == "N"))/nrow(patient_data_test)
+
+accuracy_data <- data.frame(Model_Name,
+                            Train_Accuracy,
+                            Test_Accuracy, stringsAsFactors = FALSE)
+
+kable(accuracy_data, format = 'markdown')
+```
+
+Construct an ROC (receiver operating characteristic) curve for each model and overlay them on a graph using ggplot. Include a legend. Hint: you will find the package "ROCR" helpful (or you might try the package "precrec", but I have not tested it).
+```{r eval=T, message=F}
+library(ROCR)
+roc_pred_lr <- prediction(patient_data_train$log_reg_pred, patient_data_train$dead_dependent)
+
+nai_bay_pred_raw <- predict(nai_bay_model, patient_data_train, type = 'raw')
+roc_pred_nb <- prediction(nai_bay_pred_raw[,2], patient_data_train$dead_dependent)
+
+patient_data_train_tree_nb <- patient_data_train[, c("RCONSC"          
+,"young_age"       
+,"middle_age"      
+,"high_age"             
+,"SEX"             
+,"RSLEEP"          
+,"RVISINF"         
+,"RHEP24"          
+,"RASP3"          
+,"normal_SysBP"   
+,"high_SysBP"      
+,"very_high_SysBP"            
+,"RDEF1"           
+,"RDEF2"           
+,"RDEF3"           
+,"RDEF4"           
+,"RDEF5"           
+,"RDEF6"          
+,"RDEF7"           
+,"RDEF8"           
+,"STYPE"           
+,"RXASP"           
+,"DDIAGISC"        
+,"DDIAGHA"         
+,"DDIAGUN"        
+,"DNOSTRK"                    
+,"CNTRYNUM"        
+,"dead_dependent")]
+tree_naive_bayes_raw <- bn.fit(tan_res, patient_data_train_tree_nb)
+tanProbs = predict(tree_naive_bayes_raw, patient_data_train_tree_nb, prob=T) %>% attr("prob")
+roc_pred_tree_nb <- prediction(tanProbs[2,], patient_data_train_tree_nb$dead_dependent)
+
+dec_tree_pred_raw <- predict(dec_tree_model, patient_data_train, type = "prob")
+roc_dec_tree_pred <- prediction(dec_tree_pred_raw[,2], patient_data_train$dead_dependent)
+
+plot1 <- performance(roc_pred_lr, measure="tpr", x.measure="fpr")
+plot2 <- performance(roc_pred_nb, measure="tpr", x.measure="fpr")
+plot3 <- performance(roc_pred_tree_nb, measure="tpr", x.measure="fpr")
+plot4 <- performance(roc_dec_tree_pred, measure="tpr", x.measure="fpr")
+
+plot(plot1, col="black")
+plot(plot2, add = TRUE, col = "Yellow")
+plot(plot3, add = TRUE, col = "Red")
+plot(plot4, add = TRUE, col = "Blue")
+```
+
+The ROC curves are as shown above. The legend is as follows-  
+1. Black curve- Logistic regression ROC  
+2. Yellow curve- Naive Bayes ROC  
+3. Red curve- Tree Aug Naive Bayes ROC  
+4. Blue curve- Decision Tree ROC  
+
+Construct a PR (precision recall) curve for each model. Include a legend.
+```{r eval=T, message=F}
+plot1 <- performance(roc_pred_lr, measure="prec", x.measure="rec")
+plot2 <- performance(roc_pred_nb, measure="prec", x.measure="rec")
+plot3 <- performance(roc_pred_tree_nb, measure="prec", x.measure="rec")
+plot4 <- performance(roc_dec_tree_pred, measure="prec", x.measure="rec")
+
+plot(plot1, col="black")
+plot(plot2, add = TRUE, col = "Yellow")
+plot(plot3, add = TRUE, col = "Red")
+plot(plot4, add = TRUE, col = "Blue")
+```
+
+The ROC curves are as shown above. The legend is as follows-  
+1. Black curve- Logistic regression ROC  
+2. Yellow curve- Naive Bayes ROC  
+3. Red curve- Tree Aug Naive Bayes ROC  
+4. Blue curve- Decision Tree ROC 
+
+#### Conclusions
+Let's draw conclusions from this study. Specifically,
+
+- how well are we able to predict death or dependence at 6 months?  
+Our accuracy lies between 70 and 80%. Therefore, at the end of 6 months for every 10 patients we are able to predict the outcome correctly for 7-8 patients.  
+
+- what is the average treatment effect of aspirin on death or dependence at 6 months? Is aspirin significantly better than the alternative?  
+The avg treatment effect-  
+P(Y = 1 | U = 1) => 0.622  
+P(Y = 1 | U = 0) => 0.635  
+Therefore, ATE => 0.622 - 0.635  
+ATE = 0.013  
+The average treatment effect is 1.3%.  
+
+In terms of aspirin better than no aspirin. The results were not statistically significant. However, the results were significant for one specific segment that is ischaemic strokes.  
+
+- of the algorithms tested, which algorithms perform the best? Justify your statement.  
+Based on the accuracy, the best algorithm among the four is Tree Augmented Naive Bayes. Although Logistic Regression has a higher accuracy it is only for train data. The accuracy falls for the test data. In terms of consistency Tree Aug Naive Bayes has a better performance when we take train and test data into account.  
+
+Congratulations, you've conducted a comparison of machine learning algorithms for mortality prediction! Commit your solutions to your git repository with an informative comment. ```git push``` will help you upload it to the cloud service you choose to use (github, bitbucket, etc).
